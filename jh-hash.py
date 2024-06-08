@@ -2,6 +2,7 @@ class HashReturn:
     SUCCESS = 0
     FAIL = 1
     BAD_HASHLEN = 2
+
 class HashState:
     def __init__(self, hashbitlen: int):
         self.hashbitlen = hashbitlen
@@ -19,61 +20,83 @@ roundconstant_zero = [
     0xd, 0xa, 0x2, 0xf, 0x5, 0x9, 0x0, 0xb, 0x0, 0x6, 0x6, 0x7, 0x3, 0x2, 0x2, 0xa
 ]
 
-sbox = [[9,0,4,11,13,12,3,15,1,10,2,6,7,5,8,14],[3,12,6,13,5,7,1,9,15,2,0,4,11,10,14,8]]
+sbox = [
+    [9,0,4,11,13,12,3,15,1,10,2,6,7,5,8,14],
+    [3,12,6,13,5,7,1,9,15,2,0,4,11,10,14,8]
+]
 
+# Linear transformation L on two 4-bit values
 def L(a: int, b: int):
     b ^= (((a << 1) ^ (a >> 3) ^ ((a >> 2) & 2)) & 0xf)
     a ^= (((b << 1) ^ (b >> 3) ^ ((b >> 2) & 2)) & 0xf)
     return a, b
 
+# Perform a round transformation on the hash state
 def R8(hashstate: HashState):
     tem = [0] * 256
     roundconstant_expanded = [0] * 256
+    # Expand round constants
     for i in range(256):
         roundconstant_expanded[i] = (hashstate.roundconstant[i >> 2] >> (3 - (i & 3))) & 1
+    # Apply S-box transformation
     for i in range(256):
         tem[i] = sbox[roundconstant_expanded[i]][hashstate.A[i]]
-    for i in range(0,255,2):
-        L(tem[i], tem[i + 1])
-    for i in range(0,253,4):
+    # Apply linear transformation
+    for i in range(0, 255, 2):
+        tem[i], tem[i + 1] = L(tem[i], tem[i + 1])
+    # Swap certain positions
+    for i in range(0, 253, 4):
         tem[i+2], tem[i+3] = tem[i+3], tem[i+2]
+    # Assign transformed values back to the state
     for i in range(128):
         hashstate.A[i] = tem[i << 1]
         hashstate.A[i + 128] = tem[(i << 1) + 1]
-    for i in range(128,255,2):
+    # Swap certain positions in the second half
+    for i in range(128, 255, 2):
         hashstate.A[i + 1], hashstate.A[i] = hashstate.A[i], hashstate.A[i + 1]
 
+# Update the round constants
 def update_roundconstant(hashstate: HashState):
     tem = [0] * 64
+    # Apply S-box transformation to the round constants
     for i in range(64):
         tem[i] = sbox[0][hashstate.roundconstant[i]]
-    for i in range(0,63,2):
-        L(tem[i], tem[i + 1])
-    for i in range(0,61,4):
+    # Apply linear transformation
+    for i in range(0, 63, 2):
+        tem[i], tem[i + 1] = L(tem[i], tem[i + 1])
+    # Swap certain positions
+    for i in range(0, 61, 4):
         tem[i+2], tem[i+3] = tem[i+3], tem[i+2]
+    # Assign transformed values back to the round constants
     for i in range(32):
         hashstate.roundconstant[i] = tem[i << 1]
         hashstate.roundconstant[i + 32] = tem[(i << 1) + 1]
-    for i in range(32,63,2):
+    # Swap certain positions in the second half
+    for i in range(32, 63, 2):
         hashstate.roundconstant[i + 1], hashstate.roundconstant[i] = hashstate.roundconstant[i], hashstate.roundconstant[i + 1]
 
+# Initial permutation step
 def E8_initialgroup(hashstate: HashState):
     tem = [0] * 256
+    # Group the H state into the A state
     for i in range(256):
-        t0 = hashstate.H[i >> 3] >> (7 - (i & 7)) & 1
-        t1 = hashstate.H[i + 256 >> 3] >> (7 - (i & 7)) & 1
-        t2 = hashstate.H[i + 512 >> 3] >> (7 - (i & 7)) & 1
-        t3 = hashstate.H[i + 768 >> 3] >> (7 - (i & 7)) & 1
+        t0 = (hashstate.H[i >> 3] >> (7 - (i & 7))) & 1
+        t1 = (hashstate.H[(i + 256) >> 3] >> (7 - (i & 7))) & 1
+        t2 = (hashstate.H[(i + 512) >> 3] >> (7 - (i & 7))) & 1
+        t3 = (hashstate.H[(i + 768) >> 3] >> (7 - (i & 7))) & 1
         tem[i] = (t0 << 3) | (t1 << 2) | (t2 << 1) | t3
+    # Assign grouped values to the A state
     for i in range(128):
         hashstate.A[i] = tem[i]
         hashstate.A[i + 128] = tem[i + 128]
 
+# Final permutation step
 def E8_finaldegroup(hashstate: HashState):
     tem = [0] * 256
+    # Ungroup the A state into the H state
     for i in range(128):
         tem[i] = hashstate.A[i << 1]
-        tem[i + 128] = hashstate.A[(i<< 1) + 1]
+        tem[i + 128] = hashstate.A[(i << 1) + 1]
     for i in range(128):
         hashstate.H[i] = 0
     for i in range(256):
@@ -82,44 +105,58 @@ def E8_finaldegroup(hashstate: HashState):
         t2 = (tem[i] >> 1) & 1
         t3 = (tem[i] >> 0) & 1
         hashstate.H[i >> 3] |= t0 << (7 - (i & 7))
-        hashstate.H[i + 256 >> 3] |= t1 << (7 - (i & 7))
-        hashstate.H[i + 512 >> 3] |= t2 << (7 - (i & 7))
-        hashstate.H[i + 768 >> 3] |= t3 << (7 - (i & 7))
+        hashstate.H[(i + 256) >> 3] |= t1 << (7 - (i & 7))
+        hashstate.H[(i + 512) >> 3] |= t2 << (7 - (i & 7))
+        hashstate.H[(i + 768) >> 3] |= t3 << (7 - (i & 7))
 
+# Full E8 permutation
 def E8(hashstate: HashState):
     tem = [0] * 256
+    # Initialize round constants
     for i in range(64):
         hashstate.roundconstant[i] = roundconstant_zero[i]
+    # Initial permutation step
     E8_initialgroup(hashstate)
+    # Perform 42 rounds of the R8 transformation
     for i in range(42):
         R8(hashstate)
         update_roundconstant(hashstate)
+    # Final permutation step
     E8_finaldegroup(hashstate)
 
+# Compression function F8
 def F8(hashstate: HashState):
+    # XOR buffer with H state
     for i in range(64):
         hashstate.H[i] ^= hashstate.buffer[i]
+    # Perform E8 permutation
     E8(hashstate)
+    # XOR buffer with the second half of the H state
     for i in range(64):
-        hashstate.H[i+64] ^= hashstate.buffer[i]
+        hashstate.H[i + 64] ^= hashstate.buffer[i]
 
+# Initialization function for the hash state
 def Init(hashstate: HashState, hashbitlen: int) -> int:
     hashstate.databinlen = 0
     hashstate.datasize_in_buffer = 0
     hashstate.hashbitlen = hashbitlen
+    # Initialize buffer and H state
     for i in range(64):
         hashstate.buffer[i] = 0
     for i in range(128):
         hashstate.H[i] = 0
     hashstate.H[1] = hashbitlen & 0xff
     hashstate.H[0] = (hashbitlen >> 8) & 0xff
+    # Perform initial compression
     F8(hashstate)
     return HashReturn.SUCCESS
 
+# Update function for processing data
 def Update(hashState: HashState, data: bytes, databitlen: int) -> int:
     hashState.databinlen += databitlen
     index = 0
 
+    # Handle any leftover data in the buffer
     if hashState.datasize_in_buffer > 0 and (hashState.datasize_in_buffer + databitlen) < 512:
         if databitlen % 8 == 0:
             hashState.buffer[hashState.datasize_in_buffer // 8: (hashState.datasize_in_buffer // 8) + (databitlen // 8)] = data[:databitlen // 8]
@@ -128,6 +165,7 @@ def Update(hashState: HashState, data: bytes, databitlen: int) -> int:
         hashState.datasize_in_buffer += databitlen
         databitlen = 0
 
+    # Process full blocks of data
     if hashState.datasize_in_buffer > 0 and (hashState.datasize_in_buffer + databitlen) >= 512:
         hashState.buffer[hashState.datasize_in_buffer // 8:] = data[:64 - (hashState.datasize_in_buffer // 8)]
         index = 64 - (hashState.datasize_in_buffer // 8)
@@ -141,6 +179,7 @@ def Update(hashState: HashState, data: bytes, databitlen: int) -> int:
         index += 64
         databitlen -= 512
 
+    # Handle remaining data
     if databitlen > 0:
         if databitlen % 8 == 0:
             hashState.buffer[:databitlen // 8] = data[index:index + (databitlen // 8)]
@@ -150,7 +189,9 @@ def Update(hashState: HashState, data: bytes, databitlen: int) -> int:
 
     return HashReturn.SUCCESS
 
+# Finalization function for producing the hash value
 def Final(hashState: HashState, hashval: bytearray) -> int:
+    # Handle padding and final blocks
     if hashState.databinlen % 512 == 0:
         hashState.buffer = [0] * 64
         hashState.buffer[0] = 0x80
@@ -184,6 +225,7 @@ def Final(hashState: HashState, hashval: bytearray) -> int:
         hashState.buffer[56] = (hashState.databinlen >> 56) & 0xff
         F8(hashState)
 
+    # Extract the hash value based on the hash bit length
     if hashState.hashbitlen == 224:
         hashval.extend(hashState.H[100:128])
     elif hashState.hashbitlen == 256:
@@ -195,11 +237,16 @@ def Final(hashState: HashState, hashval: bytearray) -> int:
 
     return HashReturn.SUCCESS
 
+# Top-level hash function
 def Hash(hashbitlen: int, data: bytes, databitlen: int, hashval: bytearray) -> int:
+    # Check for valid hash bit length
     if hashbitlen in (224, 256, 384, 512):
         state = HashState(hashbitlen)
+        # Initialize the hash state
         Init(state, hashbitlen)
+        # Update the hash state with input data
         Update(state, data, databitlen)
+        # Finalize the hash value
         Final(state, hashval)
         return HashReturn.SUCCESS
     else:
